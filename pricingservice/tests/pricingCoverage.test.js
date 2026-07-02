@@ -506,6 +506,13 @@ describe('pricing coverage branches', () => {
       process.env.PRICING_SERVICE_NAME = '';
       process.env.PRICING_SERVICE_VERSION = '';
 
+      jest.doMock('../db', () => ({
+        query: jest.fn(),
+        ping: jest.fn(),
+        close: jest.fn(),
+        pool: {},
+      }));
+
       const request = require('supertest');
       const app = require('../app');
 

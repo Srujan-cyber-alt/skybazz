@@ -9,6 +9,10 @@ const db = require('./db');
 const pricingRoutes = require('./routes/pricingRoutes');
 const sellerInsightsRoutes = require('./routes/sellerInsightsRoutes');
 
+const requestContext = require('./middlewares/requestContext');
+const notFound = require('./middlewares/notFound');
+const errorHandler = require('./middlewares/errorHandler');
+
 const app = express();
 
 const corsOrigins = (process.env.CORS_ORIGINS || '')
@@ -41,6 +45,17 @@ app.use(
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+app.use(requestContext);
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    service: process.env.PRICING_SERVICE_NAME || 'pricingservice',
+    version: process.env.PRICING_SERVICE_VERSION || '1.0.0',
+    requestId: req.context?.requestId || null,
+  });
+});
 
 app.get('/health', (_req, res) => {
   res.status(200).json({
@@ -101,20 +116,7 @@ app.get('/test-read', async (_req, res, next) => {
 app.use('/', pricingRoutes);
 app.use('/seller-insights', sellerInsightsRoutes);
 
-app.use((_req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-  });
-});
-
-app.use((error, _req, res, _next) => {
-  console.error(error);
-
-  res.status(error.status || 500).json({
-    success: false,
-    message: error.message || 'Internal Server Error',
-  });
-});
+app.use(notFound);
+app.use(errorHandler);
 
 module.exports = app;
