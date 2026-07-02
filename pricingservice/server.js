@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const http = require('http');
 const app = require('./app');
+const db = require('./db');
 
 const PORT = Number(process.env.PORT || 3009);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -15,46 +16,64 @@ if (!Number.isInteger(PORT) || PORT <= 0) {
 
 const server = http.createServer(app);
 
-let isShuttingDown = false;
+let shuttingDown = false;
 
 function shutdown(signal) {
-  if (isShuttingDown) {
-    return;
-  }
+  if (shuttingDown) return;
+  shuttingDown = true;
 
-  isShuttingDown = true;
-  console.log(`⚠️ pricingservice received ${signal}. Starting graceful shutdown...`);
+  console.log(`Received ${signal}. Starting graceful shutdown...`);
 
-  server.close((error) => {
+  const timer = setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+
+  timer.unref();
+
+  server.close(async (error) => {
     if (error) {
-      console.error('❌ Error while closing server:', error);
+      console.error('Error while closing server:', error);
       process.exit(1);
     }
 
-    console.log('✅ pricingservice shutdown completed');
-    process.exit(0);
+    try {
+      await db.close();
+      console.log('MySQL pool closed');
+      process.exit(0);
+    } catch (dbError) {
+      console.error('Error while closing MySQL pool:', dbError);
+      process.exit(1);
+    }
   });
-
-  setTimeout(() => {
-    console.error('❌ Forced shutdown after timeout');
-    process.exit(1);
-  }, SHUTDOWN_TIMEOUT_MS).unref();
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 process.on('unhandledRejection', (reason) => {
-  console.error('❌ Unhandled promise rejection:', reason);
+  console.error('Unhandled promise rejection:', reason);
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught exception:', error);
+  console.error('Uncaught exception:', error);
   shutdown('uncaughtException');
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`✅ pricingservice listening on ${HOST}:${PORT}`);
-});
+async function start() {
+  try {
+    await db.ping();
+    console.log('MySQL connected');
+
+    server.listen(PORT, HOST, () => {
+      console.log(`pricingservice listening on ${HOST}:${PORT}`);
+    });
+  } catch (error) {
+    console.error('MySQL connection failed:', error);
+    process.exit(1);
+  }
+}
+
+start();
 
 module.exports = server;

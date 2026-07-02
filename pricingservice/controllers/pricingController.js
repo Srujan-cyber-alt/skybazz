@@ -77,10 +77,12 @@ async function getMetadata(req, res, next) {
 
 async function getHealth(req, res, next) {
   try {
+    const health = await getPricingHealth();
+
     return res.status(200).json({
       success: true,
       requestId: req.context?.requestId || null,
-      data: getPricingHealth(),
+      data: health,
     });
   } catch (error) {
     return next(error);

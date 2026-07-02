@@ -1,5 +1,6 @@
 'use strict';
 
+const db = require('../db');
 const { convertAmount } = require('./exchangeRateService');
 const { calculateTax } = require('./taxService');
 const { calculateCustoms } = require('./customsService');
@@ -68,6 +69,7 @@ function buildSurcharges(payload) {
 
   const fuelRate = Number(process.env.DEFAULT_FUEL_SURCHARGE_RATE || 0.08);
   const fuelBase = payload.freightBase;
+
   surcharges.push({
     code: 'FUEL_SURCHARGE',
     label: 'Fuel surcharge',
@@ -114,7 +116,9 @@ function calculateBaseFreight(payload) {
 
   const distanceComponent = round2(payload.distanceKm * baseRate);
   const weightComponent = round2(payload.chargeableWeightKg * 1.75);
-  const baseFreight = round2((distanceComponent + weightComponent) * serviceLevelMultiplier * courierMultiplier);
+  const baseFreight = round2(
+    (distanceComponent + weightComponent) * serviceLevelMultiplier * courierMultiplier
+  );
 
   return {
     baseRate,
@@ -130,6 +134,128 @@ function calculateInsurance(payload) {
   if (!payload.insuranceRequired) return 0;
   const rate = Number(process.env.DEFAULT_INSURANCE_RATE || 0.0125);
   return round2(payload.declaredValue * rate);
+}
+
+function buildQuoteId() {
+  return `quote_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeUserContext(userContext = null) {
+  if (!userContext) {
+    return {
+      id: null,
+      role: null,
+      partnerId: null,
+      companyId: null,
+    };
+  }
+
+  return {
+    id: userContext.id || userContext.userId || null,
+    role: userContext.role || null,
+    partnerId: userContext.partnerId || null,
+    companyId: userContext.companyId || null,
+  };
+}
+
+async function persistQuote(result, input, userContext) {
+  const normalizedUser = normalizeUserContext(userContext);
+
+  const sql = `
+    INSERT INTO pricing_quotes (
+      quote_id,
+      user_id,
+      user_role,
+      partner_id,
+      company_id,
+      shipment_type,
+      transport_mode,
+      service_level,
+      courier,
+      origin_country,
+      destination_country,
+      weight_kg,
+      volumetric_weight_kg,
+      chargeable_weight_kg,
+      length_cm,
+      width_cm,
+      height_cm,
+      distance_km,
+      declared_value,
+      product_category,
+      hs_code,
+      base_currency,
+      settlement_currency,
+      exchange_rate,
+      freight_amount,
+      insurance_amount,
+      surcharge_total,
+      customs_total,
+      partner_adjustment_amount,
+      discount_amount,
+      taxable_amount,
+      tax_total,
+      platform_fee,
+      total_payable_base,
+      total_payable_settlement,
+      customs_declared,
+      compliance_checks_required,
+      insurance_required,
+      remote_area,
+      hazardous,
+      analytics_json,
+      quote_json
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+  `;
+
+  const params = [
+    result.quoteId,
+    normalizedUser.id,
+    normalizedUser.role,
+    normalizedUser.partnerId,
+    normalizedUser.companyId,
+    result.shipment.shipmentType,
+    result.shipment.transportMode,
+    result.shipment.serviceLevel,
+    result.shipment.courier,
+    result.shipment.originCountry,
+    result.shipment.destinationCountry,
+    result.shipment.weightKg,
+    result.shipment.volumetricWeightKg,
+    result.shipment.chargeableWeightKg,
+    result.shipment.dimensionsCm.length,
+    result.shipment.dimensionsCm.width,
+    result.shipment.dimensionsCm.height,
+    result.shipment.distanceKm,
+    result.shipment.declaredValue,
+    result.shipment.productCategory || null,
+    result.shipment.hsCode || null,
+    result.breakdownBaseCurrency.currency,
+    result.settlementCurrency.currency,
+    result.settlementCurrency.exchangeRate,
+    result.breakdownBaseCurrency.freight.amount,
+    result.breakdownBaseCurrency.insurance.amount,
+    result.breakdownBaseCurrency.surchargeTotal,
+    result.breakdownBaseCurrency.customs.totalCustomsCost || 0,
+    result.breakdownBaseCurrency.partnerAdjustment.adjustmentAmount || 0,
+    result.breakdownBaseCurrency.discount.discountAmount || 0,
+    result.breakdownBaseCurrency.taxableAmount,
+    result.breakdownBaseCurrency.tax.totalTax || 0,
+    result.breakdownBaseCurrency.platformFee,
+    result.breakdownBaseCurrency.totalPayable,
+    result.settlementCurrency.totalPayable,
+    input.customsDeclared ? 1 : 0,
+    input.complianceChecksRequired ? 1 : 0,
+    input.insuranceRequired ? 1 : 0,
+    input.remoteArea ? 1 : 0,
+    input.hazardous ? 1 : 0,
+    JSON.stringify(result.analytics || {}),
+    JSON.stringify(result),
+  ];
+
+  await db.query(sql, params);
 }
 
 async function calculateShipmentPricing(input, userContext = null) {
@@ -175,7 +301,9 @@ async function calculateShipmentPricing(input, userContext = null) {
     partnerId: input.partnerId || userContext?.partnerId || null,
   });
 
-  const subtotalAfterPartner = round2(subtotalBeforePartner + partnerAdjustment.adjustmentAmount);
+  const subtotalAfterPartner = round2(
+    subtotalBeforePartner + partnerAdjustment.adjustmentAmount
+  );
 
   const discount = calculateDiscount({
     discountCode: input.discountCode,
@@ -195,9 +323,7 @@ async function calculateShipmentPricing(input, userContext = null) {
   const platformFeeRate = Number(process.env.DEFAULT_PLATFORM_FEE_RATE || 0.015);
   const platformFee = round2(taxableAmount * platformFeeRate);
 
-  const totalBeforeCurrency = round2(
-    taxableAmount + tax.totalTax + platformFee
-  );
+  const totalBeforeCurrency = round2(taxableAmount + tax.totalTax + platformFee);
 
   const conversion = convertAmount(
     totalBeforeCurrency,
@@ -213,16 +339,18 @@ async function calculateShipmentPricing(input, userContext = null) {
     declaredValue: input.declaredValue,
   });
 
-  return {
+  const normalizedUser = normalizeUserContext(userContext);
+
+  const result = {
     success: true,
-    quoteId: `quote_${Date.now()}`,
+    quoteId: buildQuoteId(),
     calculatedAt: new Date().toISOString(),
     requestedBy: userContext
       ? {
-          id: userContext.id || null,
-          role: userContext.role || null,
-          partnerId: userContext.partnerId || null,
-          companyId: userContext.companyId || null,
+          id: normalizedUser.id,
+          role: normalizedUser.role,
+          partnerId: normalizedUser.partnerId,
+          companyId: normalizedUser.companyId,
         }
       : null,
     shipment: {
@@ -288,17 +416,42 @@ async function calculateShipmentPricing(input, userContext = null) {
     visibility: {
       canSeeCostModel: ['ADMIN', 'FINANCE'].includes(String(userContext?.role || '').toUpperCase()),
       canSeeMarginAnalytics: ['ADMIN', 'FINANCE'].includes(String(userContext?.role || '').toUpperCase()),
-      canSeePartnerAdjustments: ['ADMIN', 'FINANCE', 'OPS'].includes(String(userContext?.role || '').toUpperCase()),
+      canSeePartnerAdjustments: ['ADMIN', 'FINANCE', 'OPS'].includes(
+        String(userContext?.role || '').toUpperCase()
+      ),
     },
   };
+
+  await persistQuote(result, input, normalizedUser);
+
+  return result;
 }
 
-function getPricingHealth() {
+async function getPricingHealth() {
+  let database = {
+    status: 'down',
+  };
+
+  try {
+    await db.ping();
+    database = {
+      status: 'up',
+      host: process.env.DB_HOST || '127.0.0.1',
+      database: process.env.DB_NAME || 'pricingservice',
+    };
+  } catch (error) {
+    database = {
+      status: 'down',
+      message: error.message,
+    };
+  }
+
   return {
     service: process.env.PRICING_SERVICE_NAME || 'pricingservice',
     version: process.env.PRICING_SERVICE_VERSION || '1.0.0',
-    status: 'ok',
+    status: database.status === 'up' ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
+    database,
   };
 }
 
