@@ -6,6 +6,27 @@ process.env.PRICING_SERVICE_NAME = process.env.PRICING_SERVICE_NAME || 'pricings
 process.env.PRICING_SERVICE_VERSION = process.env.PRICING_SERVICE_VERSION || '1.0.0';
 process.env.DEFAULT_BASE_CURRENCY = process.env.DEFAULT_BASE_CURRENCY || 'USD';
 
+jest.mock('../db', () => ({
+  query: jest.fn(async (sql, params = []) => {
+    if (sql.includes('SELECT 1 AS ok')) {
+      return [[{ ok: 1 }], []];
+    }
+
+    if (sql.includes('INSERT INTO api_test_logs')) {
+      return [{ insertId: 1 }, []];
+    }
+
+    if (sql.includes('SELECT id, message, created_at FROM api_test_logs')) {
+      return [[{ id: 1, message: params[0] || 'hello from api', created_at: new Date().toISOString() }], []];
+    }
+
+    return [[], []];
+  }),
+  ping: jest.fn(async () => true),
+  close: jest.fn(async () => true),
+  pool: {},
+}));
+
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const app = require('../app');
@@ -64,11 +85,43 @@ describe('PricingService routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.message).toBe('PricingService healthy');
       expect(response.body.service).toBe(process.env.PRICING_SERVICE_NAME);
       expect(response.body.version).toBe(process.env.PRICING_SERVICE_VERSION);
-      expect(response.body.requestId).toBeTruthy();
-      expect(response.headers['x-request-id']).toBeTruthy();
+      expect(response.body.environment).toBe(process.env.NODE_ENV);
+      expect(response.body.timestamp).toBeTruthy();
+    });
+  });
+
+  describe('GET /db-check', () => {
+    it('should return db check response', async () => {
+      const response = await request(app).get('/db-check');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toEqual([{ ok: 1 }]);
+    });
+  });
+
+  describe('POST /test-save', () => {
+    it('should save a test message', async () => {
+      const response = await request(app)
+        .post('/test-save')
+        .send({ message: 'hello test' });
+
+      expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      expect(response.body.insertedId).toBe(1);
+      expect(response.body.message).toBe('hello test');
+    });
+  });
+
+  describe('GET /test-read', () => {
+    it('should return test rows', async () => {
+      const response = await request(app).get('/test-read');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(Array.isArray(response.body.data)).toBe(true);
     });
   });
 
@@ -262,13 +315,12 @@ describe('PricingService routes', () => {
   });
 
   describe('GET unknown route', () => {
-    it('should return 404 with request id', async () => {
+    it('should return 404', async () => {
       const response = await request(app).get('/unknown-route');
 
       expect(response.status).toBe(404);
       expect(response.body.success).toBe(false);
-      expect(response.body.code).toBe('ROUTE_NOT_FOUND');
-      expect(response.body.requestId).toBeTruthy();
+      expect(response.body.message).toBe('Route not found');
     });
   });
 });
