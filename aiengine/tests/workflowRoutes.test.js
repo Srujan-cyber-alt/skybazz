@@ -95,14 +95,7 @@ describe('workflow routes', () => {
     await request(app)
       .post(`/api/workflows/${workflowId}/events`)
       .send({
-        eventType: 'PLAN_CREATED',
-        actor: 'system'
-      });
-
-    await request(app)
-      .post(`/api/workflows/${workflowId}/events`)
-      .send({
-        eventType: 'DECISION_MADE',
+        eventType: 'WORKFLOW_APPROVED',
         actor: 'system'
       });
 
