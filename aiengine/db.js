@@ -9,3 +9,17 @@ export const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
 });
+
+export async function query(sql, params = []) {
+  const [rows] = await pool.execute(sql, params);
+  return rows;
+}
+
+export async function getConnection() {
+  return pool.getConnection();
+}
+
+export async function healthCheck() {
+  const [rows] = await pool.query('SELECT 1 AS ok');
+  return rows[0];
+}

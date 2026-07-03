@@ -4,9 +4,9 @@ import {
     applyEventToWorkflow
   } from '../workflow/workflowEngine.js';
   
-  function createWorkflowHandler(req, res) {
+  async function createWorkflowHandler(req, res) {
     try {
-      const workflow = createWorkflow(req.body || {});
+      const workflow = await createWorkflow(req.body || {});
   
       return res.status(201).json({
         success: true,
@@ -22,9 +22,16 @@ import {
     }
   }
   
-  function getWorkflowHandler(req, res) {
+  async function getWorkflowHandler(req, res) {
     try {
-      const workflow = getWorkflowById(req.params.id);
+      const workflow = await getWorkflowById(req.params.id);
+  
+      if (!workflow) {
+        return res.status(404).json({
+          success: false,
+          error: 'Workflow not found'
+        });
+      }
   
       return res.status(200).json({
         success: true,
@@ -40,9 +47,9 @@ import {
     }
   }
   
-  function applyWorkflowEventHandler(req, res) {
+  async function applyWorkflowEventHandler(req, res) {
     try {
-      const updatedWorkflow = applyEventToWorkflow(req.params.id, req.body || {});
+      const updatedWorkflow = await applyEventToWorkflow(req.params.id, req.body || {});
   
       return res.status(200).json({
         success: true,
