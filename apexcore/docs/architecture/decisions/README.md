@@ -51,6 +51,7 @@ These records are intended to be lightweight, reviewable, and easy to find in th
 | ADR-0025 | architecture conformance review and exception management | Accepted |
 | ADR-0026 | event schema versioning | Accepted |
 | ADR-0027 | business continuity and disaster recovery governance | Accepted |
+| ADR-0028 | third party dependency and vendor risk governance | Accepted |
 
 ## Review expectations
 
